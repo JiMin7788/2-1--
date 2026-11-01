@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>15분 하루 계획표</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #2563eb; --now: #fef3c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b2029; --text: #e5e7eb; --muted: #9ca3af;
+      --line: #2b313c; --accent: #60a5fa; --now: #3b3418;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg);
+           padding: 16px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0 0 8px; font-size: 1.3rem; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .bar input[type=date], .bar button, select {
+    font: inherit; padding: 6px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--card); color: var(--text);
+  }
+  .bar button { cursor: pointer; }
+  .summary { margin-top: 8px; font-size: .9rem; color: var(--muted); }
+  main { max-width: 900px; margin: 0 auto; padding: 16px; }
+  .hour { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          margin-bottom: 10px; overflow: hidden; }
+  .hour h2 { margin: 0; font-size: .95rem; padding: 8px 12px; border-bottom: 1px solid var(--line);
+             color: var(--muted); }
+  .slot { display: grid; grid-template-columns: 110px 1fr 90px; gap: 8px;
+          align-items: center; padding: 6px 12px; border-left: 6px solid transparent; }
+  .slot + .slot { border-top: 1px dashed var(--line); }
+  .slot.now { background: var(--now); }
+  .time { font-variant-numeric: tabular-nums; font-size: .9rem; }
+  .slot input[type=text] { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid transparent;
+          border-radius: 6px; background: transparent; color: var(--text); }
+  .slot input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .slot select { padding: 4px 6px; font-size: .85rem; }
+  @media (max-width: 560px) {
+    .slot { grid-template-columns: 1fr 80px; }
+    .time { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>하루를 15분으로 나누기</h1>
+  <div class="bar">
+    <input type="date" id="date">
+    <button id="today">오늘</button>
+    <button id="jump">현재 시간으로</button>
+    <button id="clear">이 날짜 비우기</button>
+  </div>
+  <div class="summary" id="summary"></div>
+</header>
+<main id="grid"></main>
+
+<script>
+// 하루 24시간 × 4 = 96개의 15분 칸
+const SLOT_MIN = 15;
+const SLOTS = 24 * 60 / SLOT_MIN;
+const CATS = {
+  "": { name: "분류", color: "transparent" },
+  work: { name: "공부/일", color: "#2563eb" },
+  rest: { name: "휴식", color: "#16a34a" },
+  life: { name: "생활", color: "#f59e0b" },
+  sleep: { name: "수면", color: "#7c3aed" },
+  etc: { name: "기타", color: "#9ca3af" },
+};
+
+const $ = (id) => document.getElementById(id);
+const pad = (n) => String(n).padStart(2, "0");
+const fmt = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+
+function load(date) {
+  try { return JSON.parse(localStorage.getItem("plan:" + date)) || {}; } catch { return {}; }
+}
+function save(date, data) {
+  try { localStorage.setItem("plan:" + date, JSON.stringify(data)); } catch {}
+}
+
+let date = todayStr();
+let data = {};
+
+function render() {
+  data = load(date);
+  const grid = $("grid");
+  grid.innerHTML = "";
+  for (let h = 0; h < 24; h++) {
+    const box = document.createElement("section");
+    box.className = "hour";
+    box.innerHTML = `<h2>${pad(h)}시</h2>`;
+    for (let q = 0; q < 4; q++) {
+      const i = h * 4 + q;
+      const start = i * SLOT_MIN, end = start + SLOT_MIN;
+      const entry = data[i] || { text: "", cat: "" };
+      const row = document.createElement("div");
+      row.className = "slot";
+      row.dataset.i = i;
+      row.style.borderLeftColor = CATS[entry.cat]?.color || "transparent";
+
+      const t = document.createElement("span");
+      t.className = "time";
+      t.textContent = `${fmt(start)} – ${end === 1440 ? "24:00" : fmt(end)}`;
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "할 일";
+      input.value = entry.text;
+      input.addEventListener("input", () => update(i, { text: input.value }));
+
+      const sel = document.createElement("select");
+      for (const [k, v] of Object.entries(CATS)) sel.add(new Option(v.name, k));
+      sel.value = entry.cat;
+      sel.addEventListener("change", () => {
+        update(i, { cat: sel.value });
+        row.style.borderLeftColor = CATS[sel.value].color;
+      });
+
+      row.append(t, input, sel);
+      box.append(row);
+    }
+    grid.append(box);
+  }
+  markNow();
+  summarize();
+}
+
+function update(i, patch) {
+  const e = { text: "", cat: "", ...data[i], ...patch };
+  if (!e.text && !e.cat) delete data[i]; else data[i] = e;
+  save(date, data);
+  summarize();
+}
+
+function summarize() {
+  const counts = {};
+  let filled = 0;
+  for (const e of Object.values(data)) {
+    if (e.text || e.cat) filled++;
+    if (e.cat) counts[e.cat] = (counts[e.cat] || 0) + 1;
+  }
+  const dur = (n) => { const m = n * SLOT_MIN, h = Math.floor(m / 60), r = m % 60; return [h && `${h}시간`, r && `${r}분`].filter(Boolean).join(" "); };
+  const parts = Object.entries(counts).map(([k, n]) => `${CATS[k].name} ${dur(n)}`);
+  $("summary").textContent = `총 ${SLOTS}칸 중 ${filled}칸 계획됨` + (parts.length ? " · " + parts.join(" · ") : "");
+}
+
+function currentIndex() {
+  const d = new Date();
+  return Math.floor((d.getHours() * 60 + d.getMinutes()) / SLOT_MIN);
+}
+
+function markNow() {
+  document.querySelectorAll(".slot.now").forEach((el) => el.classList.remove("now"));
+  if (date !== todayStr()) return;
+  document.querySelector(`.slot[data-i="${currentIndex()}"]`)?.classList.add("now");
+}
+
+$("date").value = date;
+$("date").addEventListener("change", (e) => { date = e.target.value || todayStr(); render(); });
+$("today").addEventListener("click", () => { date = todayStr(); $("date").value = date; render(); });
+$("jump").addEventListener("click", () => {
+  if (date !== todayStr()) { date = todayStr(); $("date").value = date; render(); }
+  document.querySelector(`.slot[data-i="${currentIndex()}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+$("clear").addEventListener("click", () => {
+  if (confirm(`${date}의 계획을 모두 지울까요?`)) { data = {}; save(date, data); render(); }
+});
+setInterval(markNow, 30 * 1000);
+
+render();
+</script>
+</body>
+</html>
